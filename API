@@ -1,0 +1,118 @@
+const SECRET = "ASTRA_X_SUPER_SECRET";
+
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" }
+  });
+}
+
+function getToken(req) {
+  return req.headers.get("Authorization")?.replace("Bearer ", "");
+}
+
+async function sign(payload) {
+  return btoa(JSON.stringify(payload) + "." + SECRET);
+}
+
+async function verify(token) {
+  try {
+    const [data, sec] = atob(token).split(".");
+    if (sec !== SECRET) return null;
+    return JSON.parse(data);
+  } catch {
+    return null;
+  }
+}
+
+export default {
+  async fetch(req, env) {
+    try {
+      const url = new URL(req.url);
+      const path = url.pathname;
+      const method = req.method;
+
+      if (path === "/login" && method === "POST") {
+        const { username, password } = await req.json();
+
+        // DEMO - sau này nối DB
+        if (username === "admin" && password === "123456") {
+          const token = await sign({
+            user: username,
+            role: "admin",
+            time: Date.now()
+          });
+          return json({ success: true, token });
+        }
+
+        return json({ success: false, msg: "Sai tài khoản" }, 401);
+      }
+
+      /* ================= AUTH CHECK ================= */
+      const token = getToken(req);
+      const user = token ? await verify(token) : null;
+      if (!user) return json({ msg: "Unauthorized" }, 401);
+
+      /* ================= RESET HWID ================= */
+      if (path === "/reset-hwid" && method === "POST") {
+        const { key, new_hwid } = await req.json();
+
+        if (!key || !new_hwid)
+          return json({ msg: "Thiếu key hoặc HWID" }, 400);
+
+        // DEMO LOGIC
+        return json({
+          success: true,
+          key,
+          new_hwid,
+          msg: "Reset HWID thành công"
+        });
+      }
+
+      /* ================= ADMIN: DELETE KEY ================= */
+      if (path === "/admin/delete-key" && method === "POST") {
+        if (user.role !== "admin")
+          return json({ msg: "Forbidden" }, 403);
+
+        const { key } = await req.json();
+        if (!key) return json({ msg: "Thiếu key" }, 400);
+
+        return json({
+          success: true,
+          msg: `Đã xoá key: ${key}`
+        });
+      }
+
+      /* ================= ADMIN: BAN USER ================= */
+      if (path === "/admin/ban-user" && method === "POST") {
+        if (user.role !== "admin")
+          return json({ msg: "Forbidden" }, 403);
+
+        const { userId, days } = await req.json();
+        if (!userId || !days)
+          return json({ msg: "Thiếu dữ liệu" }, 400);
+
+        return json({
+          success: true,
+          msg: `Đã cấm user ${userId} trong ${days} ngày`
+        });
+      }
+
+      /* ================= ADMIN: DELETE ACCOUNT ================= */
+      if (path === "/admin/delete-account" && method === "POST") {
+        if (user.role !== "admin")
+          return json({ msg: "Forbidden" }, 403);
+
+        const { userId } = await req.json();
+        return json({
+          success: true,
+          msg: `Đã xoá tài khoản ${userId}`
+        });
+      }
+
+      return json({ msg: "Not Found" }, 404);
+    } catch (e) {
+      return json({ success: false, error: e.message }, 500);
+    }
+  }
+};
